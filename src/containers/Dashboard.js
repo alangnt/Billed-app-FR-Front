@@ -72,6 +72,8 @@ export default class {
     this.document = document
     this.onNavigate = onNavigate
     this.store = store
+    // track open/close per section instead of one global counter
+    this.sectionCounters = { 1: 0, 2: 0, 3: 0 }
     $('#arrow-icon1').click((e) => this.handleShowTickets(e, bills, 1))
     $('#arrow-icon2').click((e) => this.handleShowTickets(e, bills, 2))
     $('#arrow-icon3').click((e) => this.handleShowTickets(e, bills, 3))
@@ -131,26 +133,25 @@ export default class {
   }
 
   handleShowTickets(e, bills, index) {
-    if (this.counter === undefined || this.index !== index) this.counter = 0
-    if (this.index === undefined || this.index !== index) this.index = index
-    if (this.counter % 2 === 0) {
-      $(`#arrow-icon${this.index}`).css({ transform: 'rotate(0deg)'})
-      $(`#status-bills-container${this.index}`)
-        .html(cards(filteredBills(bills, getStatus(this.index))))
-      this.counter ++
+    // toggle state for the specific column
+    if (this.sectionCounters[index] === undefined) this.sectionCounters[index] = 0
+    const isClosed = this.sectionCounters[index] % 2 === 0
+    if (isClosed) {
+      $(`#arrow-icon${index}`).css({ transform: 'rotate(0deg)' })
+      const list = filteredBills(bills, getStatus(index))
+      $(`#status-bills-container${index}`).html(cards(list))
+
+      // bind clicks only for items just rendered in THIS column
+      list.forEach(bill => {
+        const $el = $(`#open-bill${bill.id}`)
+        $el.off('click') // avoid duplicate handlers if toggled repeatedly
+        $el.on('click', (evt) => this.handleEditTicket(evt, bill, bills))
+      })
     } else {
-      $(`#arrow-icon${this.index}`).css({ transform: 'rotate(90deg)'})
-      $(`#status-bills-container${this.index}`)
-        .html("")
-      this.counter ++
+      $(`#arrow-icon${index}`).css({ transform: 'rotate(90deg)' })
+      $(`#status-bills-container${index}`).html("")
     }
-
-    bills.forEach(bill => {
-      $(`#open-bill${bill.id}`).click((e) => this.handleEditTicket(e, bill, bills))
-    })
-
-    return bills
-
+    this.sectionCounters[index]++
   }
 
   getBillsAllUsers = () => {
