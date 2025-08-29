@@ -18,6 +18,14 @@ export default class NewBill {
   handleChangeFile = e => {
     e.preventDefault()
     const file = this.document.querySelector(`input[data-testid="file"]`).files[0]
+
+    const validTypes = ["image/png", "image/jpg", "image/jpeg"]
+    if (!validTypes.includes(file.type)) {
+      alert("Les images doivent être dans un format valide (png, jpg, jpeg).")
+      file.value = "" // reset input
+      return
+    }
+
     const filePath = e.target.value.split(/\\/g)
     const fileName = filePath[filePath.length-1]
     const formData = new FormData()
