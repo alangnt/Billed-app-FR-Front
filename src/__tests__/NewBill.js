@@ -4,10 +4,20 @@
 
 import { screen, waitFor, fireEvent } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
+
 import NewBillUI from "../views/NewBillUI.js";
 import NewBill from "../containers/NewBill.js";
+import router from "../app/Router.js";
+import mockStore from "../__mocks__/store";
+import { bills as billsFixture } from "../fixtures/bills.js";
 import { localStorageMock } from "../__mocks__/localStorage.js";
 import { ROUTES_PATH } from "../constants/routes.js";
+
+// ✅ Mock ESM par défaut, sans dépendre d'une variable hoistée
+jest.mock("../app/Store.js", () => ({
+  __esModule: true,
+  default: require("../__mocks__/store").default,
+}));
 
 // Helpers
 const render = () => {
@@ -20,7 +30,6 @@ const setupEmployee = () => {
     "user",
     JSON.stringify({ type: "Employee", email: "a@a" })
   );
-  // ⚠️ NewBill lit `localStorage` (global), on l’aligne sur window.localStorage
   Object.defineProperty(global, "localStorage", { value: window.localStorage });
 };
 
@@ -184,3 +193,82 @@ describe("Given I am connected as an employee", () => {
     });
   });
 });
+
+test("Then it POSTs the bill (create+update) and navigates to Bills", async () => {
+  // reset DOM to avoid duplicate forms from previous tests
+  document.body.innerHTML = "";
+
+  // Arrange: localStorage + root + router
+  Object.defineProperty(window, "localStorage", { value: localStorageMock })
+  window.localStorage.setItem("user", JSON.stringify({ type: "Employee", email: "a@a" }))
+  Object.defineProperty(global, "localStorage", { value: window.localStorage }) // cohérent avec le container
+
+  const root = document.createElement("div")
+  root.setAttribute("id", "root")
+  document.body.append(root)
+  router()
+
+  // Espions/Mocks pour Store
+  const createMock = jest.fn().mockResolvedValue({ fileUrl: "https://cdn/test.png", key: "123" })
+  const updateMock = jest.fn().mockResolvedValue({})
+  const listMock   = jest.fn().mockResolvedValue(billsFixture) // utilisé par la page Bills après navigation
+
+  const billsSpy = jest.spyOn(mockStore, "bills").mockImplementation(() => ({
+    create: createMock,
+    update: updateMock,
+    list:   listMock,
+  }))
+
+  // Act: on va sur NewBill
+  window.onNavigate(ROUTES_PATH.NewBill)
+
+  // le formulaire doit être là (si jamais il y en a deux, on prend le premier)
+  const forms = await screen.findAllByTestId("form-new-bill")
+  const form = forms[0]
+
+  // Upload fichier valide (déclenche bills().create)
+  const fileInput = screen.getByTestId("file")
+  const file = new File(["dummy"], "note.png", { type: "image/png" })
+  await userEvent.upload(fileInput, file)
+
+  // Renseigner les champs
+  screen.getByTestId("expense-type").value = "Transports"
+  screen.getByTestId("expense-name").value = "Taxi"
+  screen.getByTestId("amount").value = "42"
+  screen.getByTestId("datepicker").value = "2023-01-02"
+  screen.getByTestId("vat").value = "20"
+  screen.getByTestId("pct").value = "10"
+  screen.getByTestId("commentary").value = "Trajet client"
+
+  // Submit (déclenche update + navigation vers Bills)
+  fireEvent.submit(form)
+
+  // Assert: navigation vers Bills (UI)
+  await waitFor(() => expect(screen.getByText("Mes notes de frais")).toBeTruthy())
+
+  // create() a bien été appelé pour l’upload
+  expect(createMock).toHaveBeenCalledTimes(1)
+  // update() a bien été appelé avec le bill + selector = "123"
+  expect(updateMock).toHaveBeenCalledTimes(1)
+  const updateArg = updateMock.mock.calls[0][0]
+  expect(updateArg.selector).toBe("123")
+
+  const sent = JSON.parse(updateArg.data)
+  expect(sent).toMatchObject({
+    type: "Transports",
+    name: "Taxi",
+    amount: 42,
+    date: "2023-01-02",
+    vat: "20",
+    pct: 10,
+    commentary: "Trajet client",
+    fileUrl: "https://cdn/test.png",
+    status: "pending",
+  })
+  expect(typeof sent.fileName).toBe("string")
+
+  // Après navigation, la page Bills appelle list()
+  expect(listMock).toHaveBeenCalled()
+
+  billsSpy.mockRestore()
+})
